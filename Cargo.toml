@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+embedded-hal = "0.2"
 cortex-m = "0.7.7"
 cortex-m-rt = "0.7.3"
 panic-semihosting = "0.6.0"
