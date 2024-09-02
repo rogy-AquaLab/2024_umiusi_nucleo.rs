@@ -7,8 +7,10 @@ use panic_semihosting as _;
 use stm32f3xx_hal as hal;
 
 use cortex_m_rt::entry;
+use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin, ToggleableOutputPin};
+use hal::gpio::GpioExt;
 use hal::pac;
-use hal::prelude::*;
+use hal::rcc::RccExt;
 
 #[entry]
 fn main() -> ! {
