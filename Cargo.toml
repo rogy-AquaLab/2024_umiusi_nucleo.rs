@@ -9,3 +9,9 @@ cortex-m-rt = "0.7.3"
 panic-semihosting = "0.6.0"
 stm32f3xx-hal.version = "0.10.0"
 stm32f3xx-hal.features = ["rt", "stm32f303x8"]
+
+[lints.clippy]
+pedantic.level = "deny"
+pedantic.priority = 0
+missing_errors_doc.level = "allow"
+missing_errors_doc.priority = 1
