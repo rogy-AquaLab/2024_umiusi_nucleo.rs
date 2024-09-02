@@ -1,0 +1,5 @@
+[build]
+# https://www.st.com/en/microcontrollers-microprocessors/stm32f303k8.html
+# https://www.arm.com/ja/products/silicon-ip-cpu/cortex-m/cortex-m4
+# https://doc.rust-lang.org/nightly/rustc/platform-support/thumbv7em-none-eabi.html
+target = "thumbv7em-none-eabihf"
