@@ -1,5 +1,15 @@
+# https://doc.rust-lang.org/cargo/reference/config.html
+
 [build]
 # https://www.st.com/en/microcontrollers-microprocessors/stm32f303k8.html
 # https://www.arm.com/ja/products/silicon-ip-cpu/cortex-m/cortex-m4
 # https://doc.rust-lang.org/nightly/rustc/platform-support/thumbv7em-none-eabi.html
 target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+# https://probe.rs/docs/tools/probe-rs/#run
+runner = "probe-rs run --chip STM32F303K8Tx"
+# https://defmt.ferrous-systems.com/setup#linker-script
+rustflags = [
+    "-Clink-arg=-Tdefmt.x"
+]
