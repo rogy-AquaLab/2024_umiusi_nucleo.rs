@@ -9,10 +9,11 @@ target = "thumbv7em-none-eabihf"
 [target.thumbv7em-none-eabihf]
 # https://probe.rs/docs/tools/probe-rs/#run
 runner = "probe-rs run --chip STM32F303K8Tx"
-linker = "arm-none-eabi-ld"
+linker = "arm-none-eabi-gcc"
 rustflags = [
     # https://defmt.ferrous-systems.com/setup#linker-script
     "-Clink-arg=-Tdefmt.x",
     # https://docs.rs/cortex-m-rt/0.7.3/cortex_m_rt/#an-example
     "-Clink-arg=-Tlink.x",
+    "-Clink-args=-mthumb -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16",
 ]
