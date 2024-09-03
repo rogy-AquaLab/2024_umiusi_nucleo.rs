@@ -1,5 +1,8 @@
 # https://doc.rust-lang.org/cargo/reference/config.html
 
+[alias]
+upload = "flash --chip STM32F303K8Tx"
+
 [build]
 # https://www.st.com/en/microcontrollers-microprocessors/stm32f303k8.html
 # https://www.arm.com/ja/products/silicon-ip-cpu/cortex-m/cortex-m4
