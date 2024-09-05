@@ -516,6 +516,7 @@ dependencies = [
  "defmt",
  "defmt-rtt",
  "embedded-hal",
+ "embedded-time",
  "panic-probe",
  "stm32f3xx-hal",
 ]
