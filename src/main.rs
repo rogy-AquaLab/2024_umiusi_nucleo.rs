@@ -11,8 +11,8 @@ use defmt_rtt as _;
 use panic_probe as _;
 use stm32f3xx_hal as hal;
 
+use alloc::boxed::Box;
 use cortex_m::interrupt::Mutex;
-use cortex_m_rt::entry;
 use embedded_alloc::LlffHeap;
 use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
 use embedded_hal::timer::CountDown;
@@ -20,20 +20,19 @@ use embedded_time::duration::Extensions as DurationExt;
 use hal::flash::FlashExt;
 use hal::gpio::GpioExt;
 use hal::interrupt;
-use hal::pac;
-use hal::pac::{NVIC, TIM2};
+use hal::pac::{self, NVIC, TIM2};
 use hal::rcc::RccExt;
 use hal::timer::{Event as TimerEvent, Timer};
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
 
-type LedType = &'static mut (dyn ToggleableOutputPin<Error = Infallible> + Send + Sync);
+type LedType = Box<dyn ToggleableOutputPin<Error = Infallible> + Send + Sync>;
 static LED: Mutex<RefCell<Option<LedType>>> = Mutex::new(RefCell::new(None));
 
 static TIMER: Mutex<RefCell<Option<Timer<TIM2>>>> = Mutex::new(RefCell::new(None));
 
-#[entry]
+#[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::debug!("entry");
 
@@ -56,22 +55,16 @@ fn main() -> ! {
     let mut timer = Timer::new(dp.TIM2, clocks, &mut rcc.apb1);
 
     let mut gpiob = dp.GPIOB.split(&mut rcc.ahb);
-    let mut led = {
+    let led = {
         let mut l = gpiob
             .pb3
             .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
         l.set_low().unwrap();
-        l
+        Box::new(l)
     };
-    defmt::debug!("done initializing");
 
-    let led_ptr = &mut led as *mut _;
-    // Box::leakライクにポインタを経由することで`led`のライフタイムを'staticに広げる
-    // **これ以降にledへのアクセス(drop含む)がなければ** この操作は安全
-    #[allow(unsafe_code)]
-    let leaked_led = unsafe { &mut (*led_ptr) as LedType };
-    cortex_m::interrupt::free(|cs| {
-        LED.borrow(cs).replace(Some(leaked_led));
+    cortex_m::interrupt::free(move |cs| {
+        LED.borrow(cs).replace(Some(led));
     });
 
     #[allow(unsafe_code)]
@@ -83,6 +76,7 @@ fn main() -> ! {
     cortex_m::interrupt::free(move |cs| {
         TIMER.borrow(cs).replace(Some(timer));
     });
+    defmt::debug!("done initializing");
 
     loop {
         cortex_m::asm::wfi();
