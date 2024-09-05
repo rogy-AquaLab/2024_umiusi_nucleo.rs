@@ -2,53 +2,85 @@
 #![no_main]
 #![no_std]
 
+use core::cell::RefCell;
+use core::convert::Infallible;
+
 use defmt_rtt as _;
 use panic_probe as _;
 
 use stm32f3xx_hal as hal;
-use stm32f3xx_hal::flash::FlashExt;
 
+use cortex_m::interrupt::Mutex;
 use cortex_m_rt::entry;
-use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::digital::v2::{OutputPin, StatefulOutputPin, ToggleableOutputPin};
+use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
+use embedded_hal::timer::CountDown;
 use embedded_time::duration::Extensions as DurationExt;
+use hal::flash::FlashExt;
 use hal::gpio::GpioExt;
+use hal::interrupt;
 use hal::pac;
+use hal::pac::{NVIC, TIM2};
 use hal::rcc::RccExt;
+use hal::timer::{Event as TimerEvent, Timer};
+
+type LedType = &'static mut (dyn ToggleableOutputPin<Error = Infallible> + Send + Sync);
+static LED: Mutex<RefCell<Option<LedType>>> = Mutex::new(RefCell::new(None));
+
+static TIMER: Mutex<RefCell<Option<Timer<TIM2>>>> = Mutex::new(RefCell::new(None));
 
 #[entry]
 fn main() -> ! {
     defmt::debug!("entry");
-    let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
 
     let mut flash = dp.FLASH.constrain();
     let mut rcc = dp.RCC.constrain();
     let clocks = rcc.cfgr.freeze(&mut flash.acr);
-    let mut delay = hal::delay::Delay::new(cp.SYST, clocks);
+    let mut timer = Timer::new(dp.TIM2, clocks, &mut rcc.apb1);
 
     let mut gpiob = dp.GPIOB.split(&mut rcc.ahb);
-    let mut led = gpiob
-        .pb3
-        .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
+    let mut led = {
+        let mut l = gpiob
+            .pb3
+            .into_push_pull_output(&mut gpiob.moder, &mut gpiob.otyper);
+        l.set_low().unwrap();
+        l
+    };
     defmt::debug!("done initializing");
 
-    led.set_low().unwrap();
+    let led_ptr = &mut led as *mut _;
+    // Box::leakライクにポインタを経由することで`led`のライフタイムを'staticに広げる
+    // **これ以降にledへのアクセス(drop含む)がなければ** この操作は安全
+    #[allow(unsafe_code)]
+    let leaked_led = unsafe { &mut (*led_ptr) as LedType };
+    cortex_m::interrupt::free(|cs| {
+        LED.borrow(cs).replace(Some(leaked_led));
+    });
+
+    #[allow(unsafe_code)]
+    unsafe {
+        NVIC::unmask(timer.interrupt());
+    }
+    timer.enable_interrupt(TimerEvent::Update);
+    timer.start(1000.milliseconds());
+    cortex_m::interrupt::free(move |cs| {
+        TIMER.borrow(cs).replace(Some(timer));
+    });
 
     loop {
-        defmt::debug!("toggle");
-        led.toggle().unwrap();
-        delay.delay_ms(1000.milliseconds());
-        // Toggle by hand.
-        // Uses `StatefulOutputPin` instead of `ToggleableOutputPin`.
-        // Logically it is the same.
-        if led.is_set_low().unwrap() {
-            defmt::debug!("high");
-            led.set_high().unwrap();
-        } else {
-            defmt::debug!("low");
-            led.set_low().unwrap();
-        }
-        delay.delay_ms(1000.milliseconds());
+        cortex_m::asm::wfi();
     }
+}
+
+#[interrupt]
+fn TIM2() {
+    cortex_m::interrupt::free(|cs| {
+        defmt::debug!("TIM2 interrupt");
+        let mut led = LED.borrow(cs).borrow_mut();
+        let led = led.as_mut().unwrap();
+        let mut timer = TIMER.borrow(cs).borrow_mut();
+        let timer = timer.as_mut().unwrap();
+        led.toggle().unwrap();
+        timer.clear_event(TimerEvent::Update);
+    });
 }
