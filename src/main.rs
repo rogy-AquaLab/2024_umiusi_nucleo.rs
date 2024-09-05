@@ -17,6 +17,7 @@ use embedded_alloc::LlffHeap;
 use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
 use embedded_hal::timer::CountDown;
 use embedded_time::duration::Extensions as DurationExt;
+use embedded_time::rate::Extensions as RateExt;
 use hal::flash::FlashExt;
 use hal::gpio::GpioExt;
 use hal::interrupt;
@@ -51,8 +52,18 @@ fn main() -> ! {
 
     let mut flash = dp.FLASH.constrain();
     let mut rcc = dp.RCC.constrain();
-    let clocks = rcc.cfgr.freeze(&mut flash.acr);
+    let clocks = rcc
+        .cfgr
+        // .use_hse(8.MHz())
+        .sysclk(48.MHz())
+        .pclk1(24.MHz())
+        .pclk2(24.MHz())
+        .freeze(&mut flash.acr);
     let mut timer = Timer::new(dp.TIM2, clocks, &mut rcc.apb1);
+
+    // FIXME: .use_hseをしないとこのassertで落ちるが、8.MHz()では動かない
+    // 適切な値を見つける必要がある
+    // defmt::assert!(clocks.usbclk_valid());
 
     let mut gpiob = dp.GPIOB.split(&mut rcc.ahb);
     let led = {
@@ -67,15 +78,16 @@ fn main() -> ! {
         LED.borrow(cs).replace(Some(led));
     });
 
-    #[allow(unsafe_code)]
-    unsafe {
-        NVIC::unmask(timer.interrupt());
-    }
     timer.enable_interrupt(TimerEvent::Update);
     timer.start(1000.milliseconds());
+    let interrupt_number = timer.interrupt();
     cortex_m::interrupt::free(move |cs| {
         TIMER.borrow(cs).replace(Some(timer));
     });
+    #[allow(unsafe_code)]
+    unsafe {
+        NVIC::unmask(interrupt_number);
+    }
     defmt::debug!("done initializing");
 
     loop {
