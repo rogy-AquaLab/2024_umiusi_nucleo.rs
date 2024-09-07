@@ -4,14 +4,15 @@
 
 extern crate alloc;
 
-use core::cell::RefCell;
-use core::convert::Infallible;
-
 use defmt_rtt as _;
 use panic_probe as _;
 use stm32f3xx_hal as hal;
 
+use core::cell::RefCell;
+use core::convert::Infallible;
+
 use alloc::boxed::Box;
+
 use cortex_m::interrupt::Mutex;
 use embedded_alloc::LlffHeap;
 use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
