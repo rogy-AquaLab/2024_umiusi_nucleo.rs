@@ -15,16 +15,20 @@ use alloc::boxed::Box;
 
 use cortex_m::interrupt::Mutex;
 use embedded_alloc::LlffHeap;
-use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
-use embedded_hal::timer::CountDown;
-use embedded_time::duration::Extensions as DurationExt;
-use embedded_time::rate::Extensions as RateExt;
-use hal::flash::FlashExt;
-use hal::gpio::GpioExt;
+use embedded_hal::blocking::delay::DelayMs as _;
+use embedded_hal::digital::v2::{OutputPin as _, ToggleableOutputPin};
+use embedded_hal::timer::CountDown as _;
+use embedded_time::duration::Extensions as _;
+use embedded_time::rate::Extensions as _;
+use hal::delay::Delay;
+use hal::dma::DmaExt as _;
+use hal::flash::FlashExt as _;
+use hal::gpio::GpioExt as _;
 use hal::interrupt;
 use hal::pac::{self, NVIC, TIM2};
-use hal::rcc::RccExt;
-use hal::timer::{Event as TimerEvent, Timer};
+use hal::rcc::RccExt as _;
+use hal::serial;
+use hal::timer::{self, Timer};
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
@@ -49,6 +53,7 @@ fn main() -> ! {
         }
     }
 
+    let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
 
     // TODO: ↓はreleaseビルドでは必要ないかも
@@ -66,17 +71,15 @@ fn main() -> ! {
     let mut rcc = dp.RCC.constrain();
     let clocks = rcc
         .cfgr
-        // .use_hse(8.MHz())
-        .sysclk(48.MHz())
-        .pclk1(24.MHz())
-        .pclk2(24.MHz())
+        .sysclk(8.MHz())
+        .pclk1(8.MHz())
+        .pclk2(8.MHz())
+        .hclk(8.MHz())
         .freeze(&mut flash.acr);
     let mut timer = Timer::new(dp.TIM2, clocks, &mut rcc.apb1);
+    let mut delay = Delay::new(cp.SYST, clocks);
 
-    // FIXME: .use_hseをしないとこのassertで落ちるが、8.MHz()では動かない
-    // 適切な値を見つける必要がある
-    // defmt::assert!(clocks.usbclk_valid());
-
+    let mut gpioa = dp.GPIOA.split(&mut rcc.ahb);
     let mut gpiob = dp.GPIOB.split(&mut rcc.ahb);
     let led = {
         let mut l = gpiob
@@ -90,7 +93,23 @@ fn main() -> ! {
         LED.borrow(cs).replace(Some(led));
     });
 
-    timer.enable_interrupt(TimerEvent::Update);
+    let tx = gpioa
+        .pa2
+        .into_af_push_pull(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrl);
+    let rx = gpioa
+        .pa15
+        .into_af_push_pull(&mut gpioa.moder, &mut gpioa.otyper, &mut gpioa.afrh);
+    let serial_config = serial::config::Config::default()
+        .baudrate(9600.Bd())
+        .parity(serial::config::Parity::None)
+        .stopbits(serial::config::StopBits::Stop1);
+    let mut serial = serial::Serial::new(dp.USART2, (tx, rx), serial_config, clocks, &mut rcc.apb1);
+
+    let dma1 = dp.DMA1.split(&mut rcc.ahb);
+    let mut tx_channel = dma1.ch7;
+    // let _rx_channel = dma1.ch6;
+
+    timer.enable_interrupt(timer::Event::Update);
     timer.start(1000.milliseconds());
     let interrupt_number = timer.interrupt();
     cortex_m::interrupt::free(move |cs| {
@@ -102,8 +121,13 @@ fn main() -> ! {
     }
     defmt::debug!("done initializing");
 
+    let message = b"Hello, world!\r\n";
     loop {
-        cortex_m::asm::wfi();
+        delay.delay_ms(500.milliseconds());
+        let write_all = serial.write_all(message, tx_channel);
+        let (_, tx_ch, ser) = write_all.wait();
+        tx_channel = tx_ch;
+        serial = ser;
     }
 }
 
@@ -116,6 +140,6 @@ fn TIM2() {
         let mut timer = TIMER.borrow(cs).borrow_mut();
         let timer = timer.as_mut().unwrap();
         led.toggle().unwrap();
-        timer.clear_event(TimerEvent::Update);
+        timer.clear_event(timer::Event::Update);
     });
 }
