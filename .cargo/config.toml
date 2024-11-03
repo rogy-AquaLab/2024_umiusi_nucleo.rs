@@ -9,6 +9,11 @@ upload = "flash --chip STM32F303K8Tx"
 # https://doc.rust-lang.org/nightly/rustc/platform-support/thumbv7em-none-eabi.html
 target = "thumbv7em-none-eabihf"
 
+[profile.dev]
+opt-level = "s"
+debug = "none"
+strip = "debuginfo"
+
 [target.thumbv7em-none-eabihf]
 # https://probe.rs/docs/tools/probe-rs/#run
 runner = "probe-rs run --chip STM32F303K8Tx"
