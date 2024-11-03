@@ -22,3 +22,5 @@ pedantic.level = "deny"
 pedantic.priority = 0
 missing_errors_doc.level = "allow"
 missing_errors_doc.priority = 1
+similar_names.level = "allow"
+similar_names.priority = 2
