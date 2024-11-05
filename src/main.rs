@@ -102,17 +102,20 @@ static LED: Mutex<RefCell<Option<LedType>>> = Mutex::new(RefCell::new(None));
 
 static TIMER: Mutex<RefCell<Option<Timer<pac::TIM2>>>> = Mutex::new(RefCell::new(None));
 
+#[expect(unsafe_code)]
+unsafe fn init_heap() {
+    use core::mem::MaybeUninit;
+    const HEAP_SIZE: usize = 1024;
+    static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+    HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE);
+}
+
 #[cortex_m_rt::entry]
 fn main() -> ! {
     defmt::debug!("entry");
 
-    // Initialize the allocator
-    {
-        use core::mem::MaybeUninit;
-        const HEAP_SIZE: usize = 1024;
-        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-        #[allow(unsafe_code)]
-        unsafe {
+    #[expect(unsafe_code)]
+    unsafe {
             HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE);
         }
     }
