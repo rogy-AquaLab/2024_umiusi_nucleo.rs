@@ -6,7 +6,7 @@ extern crate alloc;
 
 use defmt_rtt as _;
 use panic_probe as _;
-use stm32f3xx_hal as hal;
+use stm32f3xx_hal::{self as hal};
 
 use core::cell::RefCell;
 use core::convert::Infallible;
@@ -21,14 +21,78 @@ use embedded_hal::timer::CountDown as _;
 use embedded_time::duration::Extensions as _;
 use embedded_time::rate::Extensions as _;
 use hal::delay::Delay;
-use hal::dma::DmaExt as _;
+use hal::dma::{self, DmaExt as _};
 use hal::flash::FlashExt as _;
 use hal::gpio::GpioExt as _;
 use hal::interrupt;
-use hal::pac::{self, NVIC, TIM2};
+use hal::pac;
 use hal::rcc::RccExt as _;
-use hal::serial;
+use hal::serial::{self, Serial};
 use hal::timer::{self, Timer};
+
+#[derive(Debug)]
+enum EchoState<R, RxBuf, RxCh, T, TxBuf, TxCh> {
+    Receiving {
+        receive: R,
+        tx_buffer: TxBuf,
+        tx_channel: TxCh,
+    },
+    Transmitting {
+        transmit: T,
+        rx_buffer: RxBuf,
+        rx_channel: RxCh,
+    },
+}
+
+impl<Usart, Pins, RxBuf, RxCh, TxBuf, TxCh>
+    EchoState<
+        dma::Transfer<RxBuf, RxCh, Serial<Usart, Pins>>,
+        RxBuf,
+        RxCh,
+        dma::Transfer<TxBuf, TxCh, Serial<Usart, Pins>>,
+        TxBuf,
+        TxCh,
+    >
+where
+    Usart: serial::Instance + serial::Dma,
+    Serial<Usart, Pins>: dma::OnChannel<RxCh> + dma::OnChannel<TxCh>,
+    RxBuf: dma::WriteBuffer<Word = u8> + 'static,
+    RxCh: dma::Channel,
+    TxBuf: dma::ReadBuffer<Word = u8> + 'static,
+    TxCh: dma::Channel,
+{
+    fn next(self) -> Self {
+        match self {
+            Self::Receiving {
+                receive,
+                tx_buffer,
+                tx_channel,
+            } if receive.is_complete() => {
+                let (rx_buffer, rx_channel, serial) = receive.wait();
+                let transmit = serial.write_all(tx_buffer, tx_channel);
+                Self::Transmitting {
+                    transmit,
+                    rx_buffer,
+                    rx_channel,
+                }
+            }
+            Self::Transmitting {
+                transmit,
+                rx_buffer,
+                rx_channel,
+            } if transmit.is_complete() => {
+                let (tx_buffer, tx_channel, serial) = transmit.wait();
+                let receive = serial.read_exact(rx_buffer, rx_channel);
+                Self::Receiving {
+                    receive,
+                    tx_buffer,
+                    tx_channel,
+                }
+            }
+            s => s,
+        }
+    }
+}
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
@@ -36,7 +100,7 @@ static HEAP: LlffHeap = LlffHeap::empty();
 type LedType = Box<dyn ToggleableOutputPin<Error = Infallible> + Send + Sync>;
 static LED: Mutex<RefCell<Option<LedType>>> = Mutex::new(RefCell::new(None));
 
-static TIMER: Mutex<RefCell<Option<Timer<TIM2>>>> = Mutex::new(RefCell::new(None));
+static TIMER: Mutex<RefCell<Option<Timer<pac::TIM2>>>> = Mutex::new(RefCell::new(None));
 
 #[cortex_m_rt::entry]
 fn main() -> ! {
@@ -103,11 +167,11 @@ fn main() -> ! {
         .baudrate(9600.Bd())
         .parity(serial::config::Parity::None)
         .stopbits(serial::config::StopBits::Stop1);
-    let mut serial = serial::Serial::new(dp.USART2, (tx, rx), serial_config, clocks, &mut rcc.apb1);
+    let serial = Serial::new(dp.USART2, (tx, rx), serial_config, clocks, &mut rcc.apb1);
 
     let dma1 = dp.DMA1.split(&mut rcc.ahb);
-    let mut tx_channel = dma1.ch7;
-    // let _rx_channel = dma1.ch6;
+    let tx_channel = dma1.ch7;
+    let rx_channel = dma1.ch6;
 
     timer.enable_interrupt(timer::Event::Update);
     timer.start(1000.milliseconds());
@@ -117,17 +181,19 @@ fn main() -> ! {
     });
     #[allow(unsafe_code)]
     unsafe {
-        NVIC::unmask(interrupt_number);
+        pac::NVIC::unmask(interrupt_number);
     }
     defmt::debug!("done initializing");
 
-    let message = b"Hello, world!\r\n";
+    let message = b"Received!\r\n";
+    let rx_buffer = cortex_m::singleton!(: [u8; 1] = [0]).unwrap();
+    let mut state = EchoState::Receiving {
+        receive: serial.read_exact(rx_buffer, rx_channel),
+        tx_buffer: message,
+        tx_channel,
+    };
     loop {
-        delay.delay_ms(500.milliseconds());
-        let write_all = serial.write_all(message, tx_channel);
-        let (_, tx_ch, ser) = write_all.wait();
-        tx_channel = tx_ch;
-        serial = ser;
+        state = state.next();
     }
 }
 
